@@ -1,0 +1,159 @@
+# Its not finished yet
+
+
+import sys
+import os
+import xml.etree.ElementTree as ET
+import math
+import json
+from nltk.corpus import stopwords
+from nltk.tokenize import RegexpTokenizer
+from nltk.stem import PorterStemmer
+
+documents_length = {}
+documents_MaxWord = {}
+invertedIndexDictionary = {}
+idf_values = {}
+corpus = {}
+
+def calculate_idf():
+
+    number_of_doc = len(documents_length)
+
+    for word in invertedIndexDictionary:
+        word_occurance = len(invertedIndexDictionary[word])
+        idf = math.log(number_of_doc/word_occurance)
+        idf_values[word] = idf
+
+
+def calculate_Weights():
+
+    for word in invertedIndexDictionary:
+
+        idf = idf_values[word]
+
+        for doc_id in invertedIndexDictionary[word]:
+            max_word = documents_MaxWord[doc_id]
+            tf = invertedIndexDictionary[word][doc_id]['frequency']/max_word
+            weight = idf * tf
+            invertedIndexDictionary[word][doc_id]["weight_tf_idf"] = weight
+
+            documents_length[doc_id] += weight * weight
+
+
+def root_length():
+    for doc_id in documents_length:
+        documents_length[doc_id] = math.sqrt(documents_length[doc_id])
+
+
+def analyze(filePath):
+
+    xml_tree = ET.parse(filePath)
+    root = xml_tree.getroot()
+
+    for child in root.findall("./RECORD"):
+        text = ""
+        for entry in child:
+            if entry.tag =="RECORDNUM":
+                Doc_id = int(entry.text)
+                if Doc_id not in documents_length:
+                    documents_length[Doc_id] = 0
+                    documents_MaxWord[Doc_id] = 0
+            if entry.tag == "TITLE":
+                text += str(entry.text)+" "
+            if entry.tag == "ABSTRACT":
+                text += str(entry.text)+" "
+            if entry.tag == "EXTRACT":
+                text += str(entry.text)+" "
+
+        text = text.lower()
+        tokenizer = RegexpTokenizer(r'\w+')
+        text = tokenizer.tokenize(text)
+        Stopwords = set(stopwords.words("english"))
+        tmp = [word for word in text if not word in Stopwords]
+        text = tmp
+        stemmer = PorterStemmer()
+        for i in range(len(text)):
+            text[i] = stemmer.stem(text[i])
+
+        for word in text:
+            if word in invertedIndexDictionary:
+                if invertedIndexDictionary.get(word).get(Doc_id):
+                    invertedIndexDictionary[word][Doc_id]["frequency"] += 1
+                    if invertedIndexDictionary[word][Doc_id]["frequency"] > documents_MaxWord[Doc_id]:
+                        documents_MaxWord[Doc_id] = invertedIndexDictionary[word][Doc_id]["frequency"]
+                else:
+                    invertedIndexDictionary[word].update({Doc_id: {"frequency": 1, "weight_tf_idf": 0}})
+                    if 1 > documents_MaxWord[Doc_id]:
+                        documents_MaxWord[Doc_id] = 1
+            else:
+                invertedIndexDictionary[word] = {Doc_id: {"frequency": 1, "weight_tf_idf": 0}}
+                if 1 > documents_MaxWord[Doc_id]:
+                    documents_MaxWord[Doc_id] = 1
+
+def create_index():
+    path = sys.argv[2]
+    for filename in os.listdir(path):
+        if filename.endswith(".xml"):
+            new_path = path + "/" + filename
+            analyze(new_path)
+
+    calculate_idf()
+    calculate_Weights()
+    root_length()
+
+    corpus["invertedIndexDictionary"] = invertedIndexDictionary
+    corpus["documents_length"] = documents_length
+
+    inverted_index_file = open("vsm_inverted_index.json", "w")
+    json.dump(corpus, inverted_index_file, indent=8)
+    inverted_index_file.close()
+
+def filter_query():
+    query = sys.argv[4].lower()
+
+    tokenizer = RegexpTokenizer(r'\w+')
+    query = tokenizer.tokenize(query)
+
+    Stopwords = set(stopwords.words("english"))
+    tmp = [word for word in query if not word in Stopwords]
+    query = tmp
+
+    stemmer = PorterStemmer()
+    for i in range(len(query)):
+        query[i] = stemmer.stem(query[i])
+    return query
+
+
+def query():
+    path = sys.argv[3]
+    jsonfile = open(path, "r")
+    corpus = json.load(jsonfile)
+    inverted_index = corpus["invertedIndexDictionary"]
+    document_reference = corpus["documents_length"]
+    jsonfile.close()
+
+    filter_query()
+
+    query_tf_idf(query, inverted_index, amount_of_docs)
+    all_relevant_docs = results(query_dictionary, inverted_index, document_reference)
+
+    f = open("ranked_query_docs.txt", "w")
+    for i in range(0, len(all_relevant_docs)):
+        if (all_relevant_docs[i][1] >= 0.075):
+            f.write(all_relevant_docs[i][0] + "\n")
+
+    f.close()
+
+def main():
+    if (sys.argv[1] == "create_index"):
+        create_index()
+
+    elif (sys.argv[1] == "query"):
+        query()
+
+    else:
+        print("Illegal Input! \n please insert correct instruction  :)")
+
+
+main()
